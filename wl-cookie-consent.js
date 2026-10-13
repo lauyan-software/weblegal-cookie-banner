@@ -32,6 +32,9 @@
  *   • Any element with class="weblegal-cookie-settings" or href="#cookie-settings"
  *   • JS API: window.WebLegalConsent.reopen()
  *
+ * Load one embed after a visitor click on your own button, without granting a category:
+ *   window.WebLegalConsent.loadFrame(iframe, url)
+ *
  * Events:
  *   window.addEventListener('wl-cc-consent', (e) => { console.log(e.detail); })
  *
@@ -204,23 +207,27 @@
     return null;
   }
 
+  // Remplace un encart par la vraie iframe.
+  function chargerEncart(item) {
+    var iframe = _createElement('iframe');
+    iframe.src = item.src;
+    iframe.__wlAllowed = true;
+    // Copy dimensions + class from placeholder so wrappers keep working (#169)
+    iframe.width = item.placeholder.dataset.origWidth || '';
+    iframe.height = item.placeholder.dataset.origHeight || '';
+    iframe.style.cssText = item.placeholder.dataset.origStyle || '';
+    if (item.placeholder.dataset.origClass) iframe.className = item.placeholder.dataset.origClass;
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('allow', 'autoplay; encrypted-media');
+    item.placeholder.replaceWith(iframe);
+  }
+
   function unblockCategory(category) {
     blockedResources = blockedResources.filter(function(item) {
       if (item.category !== category) return true;
       if (item.type === 'iframe' && item.placeholder) {
-        // Replace consent wall with the real iframe
-        var iframe = _createElement('iframe');
-        iframe.src = item.src;
-        iframe.__wlAllowed = true;
-        // Copy dimensions + class from placeholder so wrappers keep working (#169)
-        iframe.width = item.placeholder.dataset.origWidth || '';
-        iframe.height = item.placeholder.dataset.origHeight || '';
-        iframe.style.cssText = item.placeholder.dataset.origStyle || '';
-        if (item.placeholder.dataset.origClass) iframe.className = item.placeholder.dataset.origClass;
-        iframe.setAttribute('frameborder', '0');
-        iframe.setAttribute('allowfullscreen', '');
-        iframe.setAttribute('allow', 'autoplay; encrypted-media');
-        item.placeholder.replaceWith(iframe);
+        chargerEncart(item);
       } else {
         // Re-create and inject the script
         var s = _createElement('script');
@@ -294,12 +301,17 @@
     // Style the wall to match original iframe dimensions
     if (origWidth) wall.style.width = /^\d+$/.test(origWidth) ? origWidth + 'px' : origWidth;
     if (origHeight) wall.style.height = /^\d+$/.test(origHeight) ? origHeight + 'px' : origHeight;
-    // Accept button grants consent for this category
+    // Le bouton charge CE contenu seulement (#434) : le visiteur a consenti a une
+    // video, pas a toute la categorie (pixels publicitaires compris). Un
+    // consentement doit etre specifique (RGPD art. 4-11 ; EDPB 05/2020 §55-56).
+    // Rien n'est ecrit dans le cookie de consentement.
     wall.querySelector('.wl-cc-wall-btn').onclick = function(e) {
       e.preventDefault();
-      var consent = getConsent() || { necessary: true, analytics: false, marketing: false };
-      consent[category] = true;
-      setConsent(consent);
+      blockedResources = blockedResources.filter(function(item) {
+        if (item.placeholder !== wall) return true;
+        chargerEncart(item);
+        return false;
+      });
     };
     // Track for unblocking
     blockedResources.push({ src: src, category: category, type: 'iframe', placeholder: wall });
@@ -751,9 +763,20 @@
   }
 
   // ── Public API ──
+  // loadFrame (#434) : charge UNE iframe apres un clic du visiteur sur le bouton
+  // de chargement propre a l'integrateur (TOWeb 15 « Afficher la video »), sans
+  // ecrire de consentement de categorie. A n'appeler que sur ce clic.
+  function loadFrame(iframe, url) {
+    if (!iframe || String(iframe.tagName).toUpperCase() !== 'IFRAME' || !url) return false;
+    iframe.__wlAllowed = true;
+    iframe.src = url;
+    return true;
+  }
+
   window.WebLegalConsent = {
     reopen: reopenBanner,
     getConsent: getConsent,
+    loadFrame: loadFrame,
   };
 
 
