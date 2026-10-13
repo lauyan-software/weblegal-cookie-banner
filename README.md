@@ -39,6 +39,17 @@ Self-hosting is allowed by the licence: serve the three files from the same dire
 
 Optional attributes on the tag: `data-lang`, `data-position`, `data-theme`, `data-color`, `data-services`, `data-expire`, `data-reopen-position`, `data-gpc-notice`, `data-no-branding`.
 
+## JavaScript API
+
+```js
+WebLegalConsent.reopen();            // reopen the preferences (also: <a href="#cookie-settings">, class="weblegal-cookie-settings")
+WebLegalConsent.getConsent();        // {necessary, analytics, marketing, ts, v} or null
+WebLegalConsent.loadFrame(iframe, url); // load ONE embed after a click on your own button
+window.addEventListener('wl-cc-consent', e => console.log(e.detail));
+```
+
+Blocked embeds (YouTube, Vimeo, Google Maps…) are replaced by a placeholder. Its button loads that embed only: it does not grant the whole category, so ad pixels stay blocked. If your site shows its own "load the video" button, call `loadFrame` from that click, never on page load.
+
 ## About this repository
 
 This is a read-only mirror of the files served at `https://weblegal.ai/js/`, updated on each release. Bug reports are welcome in Issues.
