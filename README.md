@@ -50,6 +50,17 @@ window.addEventListener('wl-cc-consent', e => console.log(e.detail));
 
 Blocked embeds (YouTube, Vimeo, Google Maps…) are replaced by a placeholder. Its button loads that embed only: it does not grant the whole category, so ad pixels stay blocked. If your site shows its own "load the video" button, call `loadFrame` from that click, never on page load.
 
+Accepting a placeholder accepts that service (YouTube, Vimeo, Google Maps…) for the whole site: every embed of the same service loads, now and on later pages, while other services and the marketing category stay blocked. Choosing "Reject all" (or saving with marketing off) forgets these services.
+
+## Cookies set by the banner
+
+| Cookie | Lifetime | Purpose |
+|---|---|---|
+| `wl_cc_consent` | 180 days (`data-expire`) | Stores the visitor's banner choices. |
+| `wl_cc_svc` | same as above | Set only when the visitor loads a blocked embed from its placeholder; lists the embed services they accepted. |
+
+Both are strictly necessary (they record a consent choice) and are first-party. List them in your cookie policy.
+
 ## About this repository
 
 This is a read-only mirror of the files served at `https://weblegal.ai/js/`, updated on each release. Bug reports are welcome in Issues.
