@@ -32,6 +32,10 @@
  *   • Any element with class="weblegal-cookie-settings" or href="#cookie-settings"
  *   • JS API: window.WebLegalConsent.reopen()
  *
+ * Cookies (first-party, strictly necessary, data-expire days):
+ *   wl_cc_consent  the visitor's banner choices
+ *   wl_cc_svc      embed services accepted from a placeholder (e.g. YouTube), only if used
+ *
  * Load one embed after a visitor click on your own button, without granting a category:
  *   window.WebLegalConsent.loadFrame(iframe, url)
  *
@@ -278,6 +282,17 @@
     return null;
   }
 
+  function remplacerParEncart(iframe, src, cat) {
+    var wall = createConsentWall(
+      src, cat,
+      iframe.getAttribute('width') || iframe.width,
+      iframe.getAttribute('height') || iframe.height,
+      iframe.style.cssText,
+      iframe.className
+    );
+    iframe.replaceWith(wall);
+  }
+
   // ── Video/iframe consent wall ──
   function createConsentWall(src, category, origWidth, origHeight, origStyle, origClass) {
     var wall = _createElement('div');
@@ -301,14 +316,18 @@
     // Style the wall to match original iframe dimensions
     if (origWidth) wall.style.width = /^\d+$/.test(origWidth) ? origWidth + 'px' : origWidth;
     if (origHeight) wall.style.height = /^\d+$/.test(origHeight) ? origHeight + 'px' : origHeight;
-    // Le bouton charge CE contenu seulement (#434) : le visiteur a consenti a une
-    // video, pas a toute la categorie (pixels publicitaires compris). Un
-    // consentement doit etre specifique (RGPD art. 4-11 ; EDPB 05/2020 §55-56).
-    // Rien n'est ecrit dans le cookie de consentement.
+    // Le bouton accorde CE SERVICE seulement (#434) : un clic sous une video
+    // YouTube charge les videos YouTube du site, pas toute la categorie
+    // marketing (pixels publicitaires compris). Un consentement doit etre
+    // specifique (RGPD art. 4-11 ; EDPB 05/2020 §55-56) : l'encart nomme le
+    // service. Le choix est memorise a part (cookie wl_cc_svc), sans toucher au
+    // consentement du bandeau, et oublie si le visiteur refuse le marketing.
     wall.querySelector('.wl-cc-wall-btn').onclick = function(e) {
       e.preventDefault();
+      if (serviceId) accorderService(serviceId);
       blockedResources = blockedResources.filter(function(item) {
-        if (item.placeholder !== wall) return true;
+        var memeService = serviceId && item.placeholder && detectEmbedServiceFromUrl(item.src) === serviceId;
+        if (item.placeholder !== wall && !memeService) return true;
         chargerEncart(item);
         return false;
       });
@@ -349,7 +368,17 @@
         if (String(name).toLowerCase() === 'src' && !el.__wlAllowed) {
           var consent = getConsent();
           var cat = getCategory(value);
-          if (cat && (!consent || !consent[cat])) {
+          if (cat && (!consent || !consent[cat]) && !(tagLC === 'iframe' && serviceAccorde(value))) {
+            if (tagLC === 'iframe') {
+              // Une iframe bloquee doit devenir un encart, sinon le visiteur voit un
+              // cadre vide sans rien a cliquer. L'adresse attend dans data-wl-src ;
+              // l'observateur pose l'encart a l'insertion, ou tout de suite si
+              // l'iframe est deja dans la page.
+              el.__wlBlocked = true;
+              origSetAttribute('data-wl-src', value);
+              if (el.isConnected) remplacerParEncart(el, value, cat);
+              return;
+            }
             blockedResources.push({ src: value, category: cat, type: tagLC, async: el.async });
             el.__wlBlocked = true;
             return; // don't set src
@@ -387,10 +416,18 @@
         if (!node.tagName || node.__wlAllowed) return;
         var tag = node.tagName;
         var src = node.src || node.getAttribute('src');
+        // Iframe creee par script et retenue par le crochet setAttribute.
+        var retenue = !src && tag === 'IFRAME' && node.__wlBlocked && node.getAttribute('data-wl-src');
+        if (retenue) src = retenue;
         if (!src) return;
         var consent = getConsent();
         var cat = getCategory(src);
-        if (!cat || (consent && consent[cat])) return;
+        var permis = !cat || (consent && consent[cat]) || (tag === 'IFRAME' && serviceAccorde(src));
+        if (permis) {
+          // Consentement donne entre la creation et l'insertion : on rend l'adresse.
+          if (retenue) { node.__wlAllowed = true; node.removeAttribute('data-wl-src'); node.setAttribute('src', src); }
+          return;
+        }
 
         if (tag === 'SCRIPT') {
           var origSrc = src;
@@ -398,15 +435,7 @@
           node.removeAttribute('src');
           blockedResources.push({ src: origSrc, category: cat, type: 'script', async: node.async });
         } else if (tag === 'IFRAME') {
-          // Replace iframe with consent wall
-          var wall = createConsentWall(
-            src, cat,
-            node.getAttribute('width') || node.width,
-            node.getAttribute('height') || node.height,
-            node.style.cssText,
-            node.className
-          );
-          node.replaceWith(wall);
+          remplacerParEncart(node, src, cat);
         }
       });
     });
@@ -420,7 +449,7 @@
       if (iframe.__wlAllowed) return;
       var src = iframe.getAttribute('src');
       var cat = getCategory(src);
-      if (cat && (!consent || !consent[cat])) {
+      if (cat && (!consent || !consent[cat]) && !serviceAccorde(src)) {
         var wall = createConsentWall(
           src, cat,
           iframe.getAttribute('width') || iframe.width,
@@ -449,6 +478,30 @@
     var match = document.cookie.match(new RegExp('(?:^|; )' + COOKIE_NAME + '=([^;]*)'));
     if (!match) return null;
     try { return JSON.parse(decodeURIComponent(match[1])); } catch(e) { return null; }
+  }
+
+  // Consentement par service d'integration (#434) : {s: {youtube: ts}, v}. Separe
+  // du consentement du bandeau, pour qu'un clic sur une video ne fasse pas
+  // passer le bandeau pour repondu.
+  var SVC_COOKIE = 'wl_cc_svc';
+  function getServices() {
+    var match = document.cookie.match(new RegExp('(?:^|; )' + SVC_COOKIE + '=([^;]*)'));
+    if (!match) return {};
+    try { return JSON.parse(decodeURIComponent(match[1])).s || {}; } catch(e) { return {}; }
+  }
+  function serviceAccorde(url) {
+    var id = detectEmbedServiceFromUrl(url);
+    return !!(id && getServices()[id]);
+  }
+  function accorderService(id) {
+    var svc = getServices();
+    svc[id] = new Date().toISOString();
+    var val = encodeURIComponent(JSON.stringify({ s: svc, v: CONSENT_VERSION }));
+    var expires = new Date(Date.now() + cfg.expire * 86400000).toUTCString();
+    document.cookie = SVC_COOKIE + '=' + val + ';path=/;expires=' + expires + ';SameSite=Lax';
+  }
+  function oublierServices() {
+    document.cookie = SVC_COOKIE + '=;path=/;expires=Thu, 01 Jan 1970 00:00:00 GMT';
   }
 
   // #384 — un consentement sans date ni version ne se prouve pas (EDPB 05/2020,
@@ -722,7 +775,9 @@
     cfg: cfg,
     escAttr: escAttr,
     getConsent: getConsent,
-    setConsent: setConsent,
+    // Un choix fait dans le bandeau qui refuse le marketing retire aussi les
+    // services accordes depuis un encart (#434, art. 7-3 : retrait aussi simple).
+    setConsent: function (c) { if (c && !c.marketing) oublierServices(); return setConsent(c); },
     detectLang: detectLang,
     t: t,
     T: function () { return T; },
