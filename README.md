@@ -37,7 +37,7 @@ Tags written directly in your HTML download before any script can act. Neutralis
 
 Self-hosting is allowed by the licence: serve the three files from the same directory. You then lose automatic updates (new trackers, browser changes).
 
-Optional attributes on the tag: `data-lang`, `data-position`, `data-theme`, `data-color`, `data-services`, `data-expire`, `data-reopen-position`, `data-gpc-notice`, `data-no-branding`.
+Optional attributes on the tag: `data-lang`, `data-position`, `data-theme`, `data-color`, `data-services`, `data-expire`, `data-reopen-position`, `data-gpc-notice`.
 
 ## JavaScript API
 
